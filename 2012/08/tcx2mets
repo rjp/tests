@@ -1,0 +1,99 @@
+require 'rubygems'
+require 'nokogiri'
+require 'open-uri'
+
+t_time = 0
+t_dist = 0
+t_type = ''
+t_id   = ''
+
+ActivityMap = {
+    "Other" => "Walking",
+    "Running" => "Running",
+    "Biking" => "Biking"
+}
+
+METS = { 
+	"Walking" => {
+		# mph => mets
+		0..2.0   => 0..2.8,
+		2.0..2.5 => 2.8..3.0,
+		2.5..3.5 => 3.0..4.3,
+        3.5..4.0 => 4.3..5.0,
+        4.0..5.0 => 6.0..8.3,
+	},
+    # taken from COPA 2011
+    "Running" => {
+		# mph => mets
+		0..2.0   => 0..2.8,
+		2.0..2.5 => 2.8..3.0,
+		2.5..3.5 => 3.0..4.3,
+        3.5..4.0 => 4.3..5.0,
+        4.0..5.0 => 6.0..8.3,
+        5.0..6.0 => 8.3..9.8,
+        6.0..7.0 => 9.8..11.0,
+        7.0..8.0 => 11.0..11.8,
+        8.0..9.0 => 11.8..12.8,
+        9.0..10.0 => 12.8..14.5
+    },
+    "Biking" => {
+        5.5..8.5 => 3.5..5.8,
+        8.5..10.0 => 5.8..6.8,
+        10.0..12.0 => 6.8..8.0,
+        12.0..14.0 => 8.0..10.0,
+        14.0..16.0 => 10.0..12.0,
+        16.0..20.0 => 12.0..15.8
+    }
+}
+
+def ip(min, max, v_min, pos, v_max)
+    return min + ((max-min) * ((pos.to_f-v_min.to_f)/(v_max.to_f-v_min.to_f)))
+end
+	
+# getopts for verbosity and activity filtering
+met_list = ""
+
+weight = ARGV.shift.to_f
+
+ARGV.each do |arg|
+    tcx = Nokogiri::XML(File.open(arg))
+    tcx.xpath('//xmlns:Activity').each do |activity|
+        t_type = a_type = activity['Sport']
+        t_id   = a_id   = activity['Id']
+        
+        met_sport = ActivityMap[t_type] || t_type
+        met_list  = METS[met_sport]
+        
+        a_time = 0
+        a_dist = 0
+        activity.xpath('//xmlns:Lap').each do |lap|
+            l_time = lap.xpath('xmlns:TotalTimeSeconds').inner_text.to_f
+            l_dist = lap.xpath('xmlns:DistanceMeters').inner_text.to_f
+            a_time = a_time + l_time
+            a_dist = a_dist + l_dist
+            puts "L #{lap['StartTime']} #{l_time} #{l_dist} #{a_dist}"
+        end
+        t_time = t_time + a_time
+        t_dist = t_dist + a_dist
+        a_mph = (a_dist / 1609) / (a_time / 3600.0)
+        puts "A #{a_type} #{a_id} d=#{a_dist} m=#{a_dist/1609} t=#{a_time} a=#{a_mph}"
+
+    end
+end
+
+t_mph = (t_dist / 1609) / (t_time / 3600.0)
+t_type = 'Total'
+puts "T #{t_type} #{t_id} d=#{t_dist} m=#{t_dist/1609} t=#{t_time} a=#{t_mph}"
+
+base_mph, base_range = met_list.find{|i,v| i.include?(t_mph)}
+puts "* #{[base_mph.begin, base_mph.end, base_range.begin, t_mph, base_range.end].join(', ')}"
+base_mets = ip(base_range.begin, base_range.end, base_mph.begin, t_mph, base_mph.end)
+puts "M #{base_mets}"
+
+diff_mets = 0.0
+
+h = t_time.to_i / 3600
+hf = t_time.to_f / 3600
+m = (t_time.to_i % 3600) / 60
+s = t_time.to_i % 60
+printf "C %d W %d T %02d:%02d:%02d M %.2f H %.2f B %.2f\n", weight * base_mets * t_time / 3600, weight, h, m, s, t_dist / 1609, hf, base_mets
