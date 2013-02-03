@@ -1,3 +1,4 @@
+-- 20130202 Librarified: https://github.com/rjp/shakespeare
 require 'shakeswrds'
 
 function split(string, inSplitPattern, outResults )
